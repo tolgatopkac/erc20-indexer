@@ -34,49 +34,176 @@ function App() {
   const [loadingStep, setLoadingStep] = useState("");
 
   // Error types
-  const [errorType, setErrorType] = useState(""); // 'validation', 'network', 'api', 'rate-limit'
+  const [errorType, setErrorType] = useState(""); // 'validation', 'network', 'api', 'rate-limit', 'ens'
+
+  // ENS states
+  const [isResolvingENS, setIsResolvingENS] = useState(false);
+  const [resolvedENS, setResolvedENS] = useState("");
+  const [ensName, setEnsName] = useState("");
 
   // Validation functions
+  const validateInput = (input) => {
+    try {
+      // Check if input is empty
+      if (!input || typeof input !== "string" || input.trim() === "") {
+        return {
+          isValid: false,
+          error: "Please enter an address or connect your wallet",
+        };
+      }
+
+      const cleanInput = input.trim();
+
+      // Check if it's an ENS name
+      if (isENSName(cleanInput)) {
+        return { isValid: true, type: "ens", value: cleanInput };
+      }
+
+      // Check if it's an Ethereum address
+      if (cleanInput.startsWith("0x")) {
+        return validateEthereumAddress(cleanInput);
+      }
+
+      // If it doesn't start with 0x and is not ENS, it's invalid
+      return {
+        isValid: false,
+        error:
+          "Please enter a valid Ethereum address (0x...) or ENS name (xxx.eth)",
+      };
+    } catch (error) {
+      console.error("validateInput error:", error);
+      return {
+        isValid: false,
+        error: "Invalid input format",
+      };
+    }
+  };
+
+  const isENSName = (name) => {
+    try {
+      // ENS names should be longer than 5 characters and contain at least one dot
+      if (
+        !name ||
+        typeof name !== "string" ||
+        name.length < 7 ||
+        !name.includes(".")
+      ) {
+        return false;
+      }
+
+      // Common ENS TLDs
+      const ensTLDs = [".eth", ".xyz", ".kred", ".luxe", ".club", ".art"];
+
+      // Check if it ends with a known ENS TLD
+      const hasValidTLD = ensTLDs.some((tld) =>
+        name.toLowerCase().endsWith(tld)
+      );
+
+      if (!hasValidTLD) {
+        return false;
+      }
+
+      // Check if the name part before TLD is at least 3 characters
+      const tld = ensTLDs.find((tld) => name.toLowerCase().endsWith(tld));
+      if (!tld) {
+        return false;
+      }
+
+      const namePart = name.slice(0, -tld.length);
+
+      // Name part should be at least 3 characters and contain only valid characters
+      return namePart.length >= 3 && /^[a-zA-Z0-9-]+$/.test(namePart);
+    } catch (error) {
+      console.error("isENSName error:", error);
+      return false;
+    }
+  };
+
   const validateEthereumAddress = (address) => {
-    // Check if address is empty
-    if (!address || address.trim() === "") {
-      return {
-        isValid: false,
-        error: "Please enter an address or connect your wallet",
-      };
+    try {
+      if (!address || typeof address !== "string") {
+        return { isValid: false, error: "Invalid address format" };
+      }
+
+      const cleanAddress = address.trim();
+
+      // Check if it starts with 0x
+      if (!cleanAddress.startsWith("0x")) {
+        return {
+          isValid: false,
+          error: "Ethereum address must start with '0x'",
+        };
+      }
+
+      // Check if it's the correct length (42 characters)
+      if (cleanAddress.length !== 42) {
+        return {
+          isValid: false,
+          error: "Ethereum address must be 42 characters long",
+        };
+      }
+
+      // Check if it contains only valid hex characters
+      const hexRegex = /^0x[a-fA-F0-9]{40}$/;
+      if (!hexRegex.test(cleanAddress)) {
+        return {
+          isValid: false,
+          error: "Ethereum address contains invalid characters",
+        };
+      }
+
+      // Check for common mistakes
+      if (cleanAddress === "0x0000000000000000000000000000000000000000") {
+        return { isValid: false, error: "Cannot use zero address" };
+      }
+
+      return { isValid: true, type: "address", address: cleanAddress };
+    } catch (error) {
+      console.error("validateEthereumAddress error:", error);
+      return { isValid: false, error: "Address validation failed" };
     }
+  };
 
-    // Remove whitespace
-    const cleanAddress = address.trim();
+  const resolveENS = async (ensName) => {
+    try {
+      setIsResolvingENS(true);
 
-    // Check if it starts with 0x
-    if (!cleanAddress.startsWith("0x")) {
-      return { isValid: false, error: "Ethereum address must start with '0x'" };
+      // Check if MetaMask is available
+      if (typeof window.ethereum === "undefined") {
+        throw new Error("MetaMask is required for ENS resolution");
+      }
+
+      // Use ethers provider for ENS resolution
+      const provider = new BrowserProvider(window.ethereum);
+
+      // Try to resolve ENS name
+      try {
+        const resolver = await provider.getResolver(ensName);
+
+        if (!resolver) {
+          throw new Error("ENS name not found or does not have a resolver");
+        }
+
+        const address = await resolver.getAddress();
+
+        if (
+          !address ||
+          address === "0x0000000000000000000000000000000000000000"
+        ) {
+          throw new Error("ENS name does not resolve to a valid address");
+        }
+
+        return address;
+      } catch (resolverError) {
+        console.error("ENS resolver error:", resolverError);
+        throw new Error(`ENS name '${ensName}' could not be resolved`);
+      }
+    } catch (error) {
+      console.error("ENS resolution error:", error);
+      throw new Error(`Failed to resolve ENS name: ${error.message}`);
+    } finally {
+      setIsResolvingENS(false);
     }
-
-    // Check if it's the correct length (42 characters)
-    if (cleanAddress.length !== 42) {
-      return {
-        isValid: false,
-        error: "Ethereum address must be 42 characters long",
-      };
-    }
-
-    // Check if it contains only valid hex characters
-    const hexRegex = /^0x[a-fA-F0-9]{40}$/;
-    if (!hexRegex.test(cleanAddress)) {
-      return {
-        isValid: false,
-        error: "Ethereum address contains invalid characters",
-      };
-    }
-
-    // Check for common mistakes
-    if (cleanAddress === "0x0000000000000000000000000000000000000000") {
-      return { isValid: false, error: "Cannot use zero address" };
-    }
-
-    return { isValid: true, address: cleanAddress };
   };
 
   const validateApiKey = () => {
@@ -135,17 +262,46 @@ function App() {
   };
 
   async function getTokenBalance() {
-    // Reset error states
+    // Reset all states
     setWalletError("");
     setErrorType("");
     setHasQueried(false);
+    setResolvedENS("");
+    setResults([]);
+    setTokenDataObjects([]);
+    setLoadingStep("");
 
-    // Validate input address
-    const addressValidation = validateEthereumAddress(userAddress);
-    if (!addressValidation.isValid) {
-      setWalletError(addressValidation.error);
+    // Validate input
+    const inputValidation = validateInput(userAddress);
+    if (!inputValidation.isValid) {
+      setWalletError(inputValidation.error);
       setErrorType("validation");
+      setIsLoading(false);
       return;
+    }
+
+    let finalAddress = "";
+
+    // Handle ENS resolution
+    if (inputValidation.type === "ens") {
+      try {
+        setIsLoading(true);
+        setLoadingStep("Resolving ENS name...");
+        finalAddress = await resolveENS(inputValidation.value);
+        setResolvedENS(finalAddress);
+        setEnsName(inputValidation.value);
+      } catch (error) {
+        console.error("ENS resolution failed:", error);
+        setWalletError(error.message || "Failed to resolve ENS name");
+        setErrorType("ens");
+        setIsLoading(false);
+        setLoadingStep("");
+        return;
+      }
+    } else {
+      finalAddress = inputValidation.address;
+      setEnsName("");
+      setResolvedENS("");
     }
 
     // Validate API key
@@ -166,14 +322,13 @@ function App() {
       };
 
       const alchemy = new Alchemy(config);
-      const cleanAddress = addressValidation.address;
 
       setLoadingStep("Validating address...");
 
       // Additional runtime validation
       try {
         // This will throw if address is invalid
-        const checksumAddress = cleanAddress; // ethers.utils.getAddress(cleanAddress) in v5
+        const checksumAddress = finalAddress; // ethers.utils.getAddress(finalAddress) in v5
         console.log("Using address:", checksumAddress);
       } catch (checksumError) {
         setWalletError("Invalid Ethereum address format");
@@ -182,7 +337,7 @@ function App() {
       }
 
       setLoadingStep("Fetching token balances...");
-      const data = await alchemy.core.getTokenBalances(cleanAddress);
+      const data = await alchemy.core.getTokenBalances(finalAddress);
 
       // Validate response
       if (!data) {
@@ -343,12 +498,29 @@ function App() {
 
   // Disconnect wallet function
   const disconnectWallet = () => {
-    setIsWalletConnected(false);
-    setConnectedAddress("");
-    setUserAddress("");
-    setResults([]);
-    setHasQueried(false);
-    setTokenDataObjects([]);
+    try {
+      setIsWalletConnected(false);
+      setConnectedAddress("");
+      setUserAddress("");
+      setResults([]);
+      setHasQueried(false);
+      setTokenDataObjects([]);
+      setWalletError("");
+      setErrorType("");
+      setEnsName("");
+      setResolvedENS("");
+      setIsLoading(false);
+      setIsResolvingENS(false);
+      setLoadingStep("");
+    } catch (error) {
+      console.error("Disconnect wallet error:", error);
+      // Force reset critical states
+      setIsWalletConnected(false);
+      setConnectedAddress("");
+      setUserAddress("");
+      setWalletError("");
+      setErrorType("");
+    }
   };
 
   // Check connection on component mount
@@ -510,7 +682,7 @@ function App() {
                 </Box>
 
                 {/* Error Display */}
-                {walletError && (
+                {walletError && typeof walletError === "string" && (
                   <Alert
                     status="error"
                     mt={4}
@@ -523,6 +695,7 @@ function App() {
                     <Flex align="center" gap={2}>
                       <Text fontSize="lg">
                         {errorType === "validation" && "⚠️"}
+                        {errorType === "ens" && "❌"}
                         {errorType === "network" && "🌐"}
                         {errorType === "api" && "🔑"}
                         {errorType === "rate-limit" && "⏰"}
@@ -535,7 +708,15 @@ function App() {
                         {errorType === "validation" && (
                           <Text color="red.600" fontSize="sm" mt={1}>
                             💡 Tip: Ethereum addresses start with '0x' and are
-                            42 characters long
+                            42 characters long, or use ENS names like
+                            'vitalik.eth' (minimum 3 characters before .eth)
+                          </Text>
+                        )}
+                        {errorType === "ens" && (
+                          <Text color="red.600" fontSize="sm" mt={1}>
+                            💡 Tip: Make sure the ENS name is correct and
+                            resolves to a valid address. Try a well-known ENS
+                            like 'vitalik.eth'
                           </Text>
                         )}
                         {errorType === "network" && (
@@ -581,57 +762,133 @@ function App() {
               <Box position="relative" maxW="600px">
                 <Input
                   onChange={(e) => {
-                    const value = e.target.value;
-                    setUserAddress(value);
+                    try {
+                      const value = e.target.value;
+                      setUserAddress(value);
 
-                    // Real-time validation feedback
-                    if (value && !isWalletConnected) {
-                      const validation = validateEthereumAddress(value);
-                      if (!validation.isValid) {
-                        setWalletError(validation.error);
-                        setErrorType("validation");
-                      } else {
-                        setWalletError("");
-                        setErrorType("");
-                      }
-                    } else if (!value) {
+                      // Reset states first
                       setWalletError("");
                       setErrorType("");
+                      setEnsName("");
+
+                      // Real-time validation feedback
+                      if (value && !isWalletConnected) {
+                        try {
+                          const validation = validateInput(value);
+                          if (validation && typeof validation === "object") {
+                            if (!validation.isValid) {
+                              setWalletError(
+                                validation.error || "Invalid input"
+                              );
+                              setErrorType("validation");
+                            } else {
+                              // If it's ENS, show that it's detected
+                              if (
+                                validation.type === "ens" &&
+                                validation.value
+                              ) {
+                                setEnsName(validation.value);
+                              }
+                            }
+                          } else {
+                            setWalletError("Invalid input format");
+                            setErrorType("validation");
+                          }
+                        } catch (validationError) {
+                          console.error("Validation error:", validationError);
+                          setWalletError("Invalid input format");
+                          setErrorType("validation");
+                        }
+                      }
+                    } catch (error) {
+                      console.error("Input change error:", error);
+                      setWalletError("Input error");
+                      setErrorType("validation");
                     }
                   }}
                   value={userAddress}
                   placeholder={
                     isWalletConnected
                       ? "Connected wallet address"
-                      : "Enter Ethereum address (0x...)"
+                      : "Enter Ethereum address (0x...) or ENS name (xxx.eth)"
                   }
                   size="lg"
                   bg="white"
                   color="gray.800"
                   border="2px solid"
-                  borderColor={
-                    walletError && errorType === "validation"
-                      ? "red.300"
-                      : userAddress && !walletError
-                      ? "green.300"
-                      : "gray.200"
-                  }
+                  borderColor={(() => {
+                    try {
+                      if (
+                        walletError &&
+                        typeof walletError === "string" &&
+                        (errorType === "validation" || errorType === "ens")
+                      ) {
+                        return "red.300";
+                      }
+                      if (
+                        userAddress &&
+                        typeof userAddress === "string" &&
+                        !walletError
+                      ) {
+                        return ensName && typeof ensName === "string"
+                          ? "purple.300"
+                          : "green.300";
+                      }
+                      return "gray.200";
+                    } catch (error) {
+                      console.error("Border color error:", error);
+                      return "gray.200";
+                    }
+                  })()}
                   borderRadius="xl"
                   _hover={{
-                    borderColor:
-                      walletError && errorType === "validation"
-                        ? "red.400"
-                        : "purple.300",
+                    borderColor: (() => {
+                      try {
+                        if (
+                          walletError &&
+                          typeof walletError === "string" &&
+                          (errorType === "validation" || errorType === "ens")
+                        ) {
+                          return "red.400";
+                        }
+                        return "purple.300";
+                      } catch (error) {
+                        console.error("Hover border color error:", error);
+                        return "purple.300";
+                      }
+                    })(),
                   }}
                   _focus={{
-                    borderColor:
-                      walletError && errorType === "validation"
-                        ? "red.500"
-                        : "purple.500",
-                    boxShadow:
-                      walletError && errorType === "validation"
-                        ? "0 0 0 3px rgba(239, 68, 68, 0.1)"
-                        : "0 0 0 3px rgba(102, 126, 234, 0.1)",
+                    borderColor: (() => {
+                      try {
+                        if (
+                          walletError &&
+                          typeof walletError === "string" &&
+                          (errorType === "validation" || errorType === "ens")
+                        ) {
+                          return "red.500";
+                        }
+                        return "purple.500";
+                      } catch (error) {
+                        console.error("Focus border color error:", error);
+                        return "purple.500";
+                      }
+                    })(),
+                    boxShadow: (() => {
+                      try {
+                        if (
+                          walletError &&
+                          typeof walletError === "string" &&
+                          (errorType === "validation" || errorType === "ens")
+                        ) {
+                          return "0 0 0 3px rgba(239, 68, 68, 0.1)";
+                        }
+                        return "0 0 0 3px rgba(102, 126, 234, 0.1)";
+                      } catch (error) {
+                        console.error("Focus box shadow error:", error);
+                        return "0 0 0 3px rgba(102, 126, 234, 0.1)";
+                      }
+                    })(),
                   }}
                   _placeholder={{
                     color: "gray.400",
@@ -650,21 +907,72 @@ function App() {
                   transform="translateY(-50%)"
                   zIndex={1}
                 >
-                  {userAddress && !walletError && !isWalletConnected && (
-                    <Text fontSize="xl" color="green.500">
-                      ✅
-                    </Text>
-                  )}
-                  {walletError && errorType === "validation" && (
-                    <Text fontSize="xl" color="red.500">
-                      ⚠️
-                    </Text>
-                  )}
-                  {isWalletConnected && (
-                    <Text fontSize="xl" color="blue.500">
-                      🔗
-                    </Text>
-                  )}
+                  {(() => {
+                    try {
+                      if (isResolvingENS) {
+                        return (
+                          <Text fontSize="xl" color="yellow.500">
+                            🔄
+                          </Text>
+                        );
+                      }
+
+                      if (isWalletConnected) {
+                        return (
+                          <Text fontSize="xl" color="blue.500">
+                            🔗
+                          </Text>
+                        );
+                      }
+
+                      if (walletError && typeof walletError === "string") {
+                        if (errorType === "validation") {
+                          return (
+                            <Text fontSize="xl" color="red.500">
+                              ⚠️
+                            </Text>
+                          );
+                        }
+                        if (errorType === "ens") {
+                          return (
+                            <Text fontSize="xl" color="red.500">
+                              ❌
+                            </Text>
+                          );
+                        }
+                      }
+
+                      if (
+                        ensName &&
+                        !walletError &&
+                        typeof ensName === "string"
+                      ) {
+                        return (
+                          <Text fontSize="xl" color="purple.500">
+                            🌐
+                          </Text>
+                        );
+                      }
+
+                      if (
+                        userAddress &&
+                        !walletError &&
+                        !ensName &&
+                        typeof userAddress === "string"
+                      ) {
+                        return (
+                          <Text fontSize="xl" color="green.500">
+                            ✅
+                          </Text>
+                        );
+                      }
+
+                      return null;
+                    } catch (error) {
+                      console.error("Icon rendering error:", error);
+                      return null;
+                    }
+                  })()}
                 </Box>
               </Box>
 
@@ -693,7 +1001,7 @@ function App() {
               </Button>
 
               {/* Loading Progress */}
-              {isLoading && (
+              {(isLoading || isResolvingENS) && (
                 <Flex
                   direction="column"
                   align="center"
@@ -706,6 +1014,11 @@ function App() {
                   <Text color="purple.600" fontSize="sm" fontWeight="medium">
                     {loadingStep}
                   </Text>
+                  {isResolvingENS && (
+                    <Text color="yellow.600" fontSize="xs">
+                      🔄 Resolving ENS name...
+                    </Text>
+                  )}
                 </Flex>
               )}
             </Flex>
@@ -723,6 +1036,36 @@ function App() {
             <Heading size="lg" color="gray.700" textAlign="center" mb={8}>
               💰 Token Portfolio
             </Heading>
+
+            {/* ENS Resolution Display */}
+            {ensName &&
+              resolvedENS &&
+              typeof ensName === "string" &&
+              typeof resolvedENS === "string" && (
+                <Box
+                  bg="purple.50"
+                  border="2px solid"
+                  borderColor="purple.200"
+                  borderRadius="xl"
+                  p={4}
+                  mb={6}
+                  textAlign="center"
+                >
+                  <HStack spacing={2} justify="center">
+                    <Text fontSize="lg">🌐</Text>
+                    <Text color="purple.700" fontWeight="medium">
+                      {ensName}
+                    </Text>
+                    <Text color="gray.500">→</Text>
+                    <Text color="purple.600" fontSize="sm" fontFamily="mono">
+                      {resolvedENS.slice(0, 6)}...{resolvedENS.slice(-4)}
+                    </Text>
+                  </HStack>
+                  <Text color="purple.600" fontSize="xs" mt={1}>
+                    ENS name successfully resolved!
+                  </Text>
+                </Box>
+              )}
 
             {isLoading ? (
               <Flex direction="column" align="center" gap={6} py={12}>
