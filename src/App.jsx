@@ -8,16 +8,26 @@ import {
   Input,
   SimpleGrid,
   Text,
+  Alert,
+  HStack,
 } from "@chakra-ui/react";
 import { Alchemy, Network } from "alchemy-sdk";
-import { formatUnits } from "ethers";
-import { useState } from "react";
+import { formatUnits, BrowserProvider } from "ethers";
+import { useState, useEffect } from "react";
 
 function App() {
+  // Existing states
   const [userAddress, setUserAddress] = useState("");
   const [results, setResults] = useState([]);
   const [hasQueried, setHasQueried] = useState(false);
   const [tokenDataObjects, setTokenDataObjects] = useState([]);
+
+  // New wallet states
+  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [connectedAddress, setConnectedAddress] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [walletError, setWalletError] = useState("");
+
   async function getTokenBalance() {
     const config = {
       apiKey: import.meta.env.VITE_ALCHEMY_API_KEY,
@@ -41,6 +51,70 @@ function App() {
     setTokenDataObjects(await Promise.all(tokenDataPromises));
     setHasQueried(true);
   }
+
+  // MetaMask detection
+  const checkWalletConnection = async () => {
+    if (typeof window.ethereum !== "undefined") {
+      try {
+        const provider = new BrowserProvider(window.ethereum);
+        const accounts = await provider.listAccounts();
+
+        if (accounts.length > 0) {
+          setIsWalletConnected(true);
+          setConnectedAddress(accounts[0].address);
+          setUserAddress(accounts[0].address);
+        }
+      } catch (error) {
+        console.error("Error checking wallet connection:", error);
+      }
+    }
+  };
+
+  // Connect wallet function
+  const connectWallet = async () => {
+    if (typeof window.ethereum === "undefined") {
+      setWalletError(
+        "MetaMask is not installed. Please install MetaMask to continue."
+      );
+      return;
+    }
+
+    setIsConnecting(true);
+    setWalletError("");
+
+    try {
+      const provider = new BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+
+      const signer = await provider.getSigner();
+      const address = await signer.getAddress();
+
+      setIsWalletConnected(true);
+      setConnectedAddress(address);
+      setUserAddress(address);
+    } catch (error) {
+      setWalletError("Failed to connect wallet. Please try again.");
+      console.error("Wallet connection error:", error);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Disconnect wallet function
+  const disconnectWallet = () => {
+    setIsWalletConnected(false);
+    setConnectedAddress("");
+    setUserAddress("");
+    setResults([]);
+    setHasQueried(false);
+    setTokenDataObjects([]);
+  };
+
+  // Check connection on component mount
+  useEffect(() => {
+    checkWalletConnection();
+  }, []);
+
   return (
     <Box w="100vw">
       <Center>
@@ -53,11 +127,46 @@ function App() {
             ERC-20 Token Indexer
           </Heading>
           <Text>
-            Plug in an address and this website will return all of its ERC-20
-            token balances!
+            Connect your wallet or enter an address to check ERC-20 token
+            balances!
           </Text>
+
+          {/* Wallet Connection Section */}
+          <Box mt={6}>
+            {!isWalletConnected ? (
+              <Button
+                onClick={connectWallet}
+                isLoading={isConnecting}
+                loadingText="Connecting..."
+                colorScheme="blue"
+                size="lg"
+              >
+                Connect Wallet
+              </Button>
+            ) : (
+              <HStack spacing={4}>
+                <Text color="green.500">
+                  Connected: {connectedAddress.slice(0, 6)}...
+                  {connectedAddress.slice(-4)}
+                </Text>
+                <Button onClick={disconnectWallet} size="sm" variant="outline">
+                  Disconnect
+                </Button>
+              </HStack>
+            )}
+          </Box>
+
+          {/* Error Display */}
+          {walletError && (
+            <Alert status="error" mt={4} maxW="600px">
+              <AlertIcon />
+              {walletError}
+            </Alert>
+          )}
         </Flex>
       </Center>
+
+      {/* Rest of existing UI */}
       <Flex
         w="100%"
         flexDirection="column"
@@ -69,12 +178,18 @@ function App() {
         </Heading>
         <Input
           onChange={(e) => setUserAddress(e.target.value)}
+          value={userAddress}
           color="black"
           w="600px"
           textAlign="center"
           p={4}
           bgColor="white"
           fontSize={24}
+          placeholder={
+            isWalletConnected
+              ? "Connected wallet address"
+              : "Enter Ethereum address"
+          }
         />
         <Button fontSize={20} onClick={getTokenBalance} mt={36} bgColor="blue">
           Check ERC-20 Token Balances
