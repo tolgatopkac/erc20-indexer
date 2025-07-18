@@ -583,6 +583,7 @@ function App() {
 
       <Box
         minH="100vh"
+        minW="100vw"
         bg="linear-gradient(135deg, #667EEA 0%, #764BA2 100%)"
         py={8}
       >
@@ -761,6 +762,7 @@ function App() {
 
               <Box position="relative" maxW="600px">
                 <Input
+                  minW="350px"
                   onChange={(e) => {
                     try {
                       const value = e.target.value;
